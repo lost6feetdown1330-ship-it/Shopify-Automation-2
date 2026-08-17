@@ -32,7 +32,7 @@ We recommend running **both**. Flow handles simple reliable native triggers. Our
    - `read_inventory`, `write_inventory`
    - `read_customers`
    - `read_fulfillments`, `write_fulfillments`
-4. Install → copy Admin API access token + your `yourstore.myshopify.com`
+4. Install → copy Admin API access token + bcyeb3-1s.myshopify.com'
 
 ### 2. Configure `.env`
 
