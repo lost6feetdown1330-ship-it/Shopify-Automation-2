@@ -1,0 +1,11 @@
+version: "3.8"
+
+services:
+  autopilot:
+    build: .
+    container_name: shopify-autopilot-2
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
