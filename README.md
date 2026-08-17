@@ -1,110 +1,139 @@
 # Shopify Autopilot 2 — The Do-Everything Edition
 
-This is the full autonomous system for your Shopify store.
-
-It watches orders, inventory, customers, products, and support.
-It acts where it's safe.
-It asks you (via phone notification) when it needs human approval for anything risky.
+Full autonomous system for your Shopify store + **Shopify Flow** integration.
 
 **Goal:** You do almost nothing after setup.
 
 ---
 
-## What it actually does right now
+## What this system does
 
-- Continuously monitors new orders and flags issues
-- Tracks inventory levels and alerts before you stock out
-- Basic customer support drafting + order status replies (with approval gate)
-- Daily summary report pushed to your phone
-- Structured logging so you can see exactly what it did
-- Human-in-the-loop for refunds, price changes, bulk edits, etc.
-- Ready for you to drop in stronger AI models later
+### Custom Agents (this repo)
+- Continuously monitors paid but unfulfilled orders → alerts your phone
+- Tracks inventory and screams before you stock out
+- Daily summary report to your phone
+- Structured logging + human-in-the-loop safety
+- Ready for stronger AI later
+
+### Shopify Flow (native)
+We recommend running **both**. Flow handles simple reliable native triggers. Our agents handle continuous monitoring + phone alerts + more complex logic.
 
 ---
 
-## Setup (seriously, try to keep it to 3 steps)
+## Setup (3 steps max)
 
-### 1. Create a private Shopify app + get credentials
+### 1. Create a private Shopify app
 
-1. Go to your Shopify admin → Settings → Apps and sales channels → Develop apps
-2. Create a new app
-3. Configure Admin API scopes (start with these):
+1. Shopify admin → Settings → Apps and sales channels → Develop apps
+2. Create app
+3. Admin API scopes (minimum):
    - `read_products`, `write_products`
    - `read_orders`, `write_orders`
    - `read_inventory`, `write_inventory`
    - `read_customers`
    - `read_fulfillments`, `write_fulfillments`
-4. Install the app on your store
-5. Copy the **Admin API access token** and your store name (`yourstore.myshopify.com`)
+4. Install → copy Admin API access token + your `yourstore.myshopify.com`
 
-### 2. Fill the `.env` file
+### 2. Configure `.env`
 
 ```bash
 cp .env.example .env
 ```
 
-Then edit `.env` with your real values:
+Fill in:
 
 ```env
 SHOPIFY_SHOP=yourstore.myshopify.com
-SHOPIFY_ACCESS_TOKEN=shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SHOPIFY_ACCESS_TOKEN=shpat_xxxxxxxx
 SHOPIFY_API_VERSION=2025-10
 
-# Optional but highly recommended for phone notifications
+# Strongly recommended for iPhone alerts
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
-
-# Optional – for stronger AI later
-OPENAI_API_KEY=
 ```
 
 ### 3. Run it
-
-**Easiest way (Docker):**
 
 ```bash
 docker compose up -d
 ```
 
-**Or locally:**
+or
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-That's it. The system starts watching your store.
+---
+
+## Shopify Flow Recommended Workflows
+
+Set these up in **Shopify Admin → Apps → Flow**. They complement the agents perfectly.
+
+### 1. High-Value Order Alert
+- **Trigger:** Order created
+- **Condition:** Order total > $150 (or whatever number you want)
+- **Action:** Send internal email / Slack / Telegram notification  
+  (or use “Send HTTP request” to hit our webhook if you want the agents to also react)
+
+### 2. Low Inventory Tagging
+- **Trigger:** Inventory quantity changed
+- **Condition:** Inventory quantity ≤ 5
+- **Action:** Add product tag `low-stock` + send internal notification
+
+### 3. Unfulfilled Order Escalation
+- **Trigger:** Scheduled (every day)
+- **Get data:** Orders that are paid + unfulfilled + created > 48 hours ago
+- **Action:** Tag the order `needs-attention` + notify you
+
+### 4. New Customer Welcome + Tag
+- **Trigger:** Customer created
+- **Action:** Add tag `new-customer` + send welcome email (via Shopify Email or Klaviyo connector)
+
+### 5. Cancelled Order Cleanup
+- **Trigger:** Order cancelled
+- **Action:** Remove any “vip” or special tags, add `cancelled`, notify if it was a high-value order
+
+### 6. Flow → Our Agents (optional power move)
+You can make Flow call our system:
+- In any Flow workflow, add action **Send HTTP request**
+- Point it at: `https://your-server.com/webhooks/flow`
+- Body can include whatever data you want
+- Our system will log it and can react (we can expand this later)
 
 ---
 
-## How you control it from your iPhone
+## Webhook Support (already built)
 
-- Daily reports and alerts come through Telegram (set it up once)
-- When the agent wants to do something risky (refund, big inventory change, etc.), it will send you a message with Approve / Reject buttons (or simple reply)
-- You can also check the logs or hit the simple status endpoint
+The system now has a basic webhook endpoint so Shopify or Flow can push events instead of pure polling.
+
+Once the server is running, endpoints available:
+- `POST /webhooks/shopify` — for native Shopify webhooks
+- `POST /webhooks/flow` — for Shopify Flow HTTP requests
 
 ---
 
 ## Project Structure
 
 ```
-main.py                 → starts everything
-config.py               → loads settings
-shopify/client.py       → smart GraphQL client with rate limiting
-agents/                 → specialized agents (order, inventory, support...)
-services/notifier.py    → phone notifications
-workers/scheduler.py    → background jobs
+main.py                 → starts agents + webhook server
+config.py
+shopify/client.py       → GraphQL client
+agents/                 → Order, Inventory, Reporter
+services/notifier.py    → Telegram / phone alerts
+workers/scheduler.py
 ```
 
 ---
 
-## Important Safety Notes
+## Safety
 
-- High-risk actions (refunds, price changes, deleting products, etc.) are **blocked by default** and require your explicit approval.
-- All actions are logged.
-- Start in a development store if you're nervous.
-- You can turn individual agents on/off in `config.py`.
+- High-risk actions stay behind approval
+- Everything is logged
+- Start on a development store if you’re nervous
+- Agents can be toggled in `config.py`
 
 ---
 
-Built to be extended. Want me to add abandoned cart recovery, product description rewriting, competitor price watching, or full AI support agent next? Just say the word.
+Want me to add abandoned cart recovery, AI product description rewriting, or a full support reply agent next? Just say it.
