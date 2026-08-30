@@ -11,18 +11,48 @@ jobs:
     steps:
       - name: Ping Shopify
         env:
-          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
           SHOPIFY_SHOP: ${{ secrets.SHOPIFY_SHOP }}
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
           SHOPIFY_API_VERSION: "2025-10"
         run: |
           python - <<'PY'
-          import json, os, urllib.request
+          import json, os, urllib.parse, urllib.request
+
           shop = (os.environ.get("SHOPIFY_SHOP") or "").replace("https://", "").replace("http://", "").strip("/")
           token = os.environ.get("SHOPIFY_ACCESS_TOKEN") or ""
-          if not shop or not token:
-              raise SystemExit("Missing secrets. Add SHOPIFY_ACCESS_TOKEN and SHOPIFY_SHOP in repo Settings > Secrets > Actions.")
+          client_id = os.environ.get("SHOPIFY_CLIENT_ID") or ""
+          client_secret = os.environ.get("SHOPIFY_CLIENT_SECRET") or ""
           version = os.environ.get("SHOPIFY_API_VERSION", "2025-10")
-          url = f"https://{shop}/admin/api/{version}/graphql.json"
+
+          if not shop:
+              raise SystemExit("Missing SHOPIFY_SHOP secret.")
+
+          if not token:
+              if not client_id or not client_secret:
+                  raise SystemExit("Need SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET (the shpss one).")
+              data = urllib.parse.urlencode({
+                  "grant_type": "client_credentials",
+                  "client_id": client_id,
+                  "client_secret": client_secret,
+              }).encode()
+              req = urllib.request.Request(
+                  f"https://{shop}/admin/oauth/access_token",
+                  data=data,
+                  headers={"Content-Type": "application/x-www-form-urlencoded"},
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      payload = json.loads(resp.read().decode())
+              except Exception as e:
+                  raise SystemExit(f"Token exchange failed: {e}")
+              token = payload.get("access_token") or ""
+              if not token:
+                  raise SystemExit(f"Token exchange returned no access_token: {payload}")
+              print("Got a short-lived Admin token from client credentials.")
+
           query = {
             "query": """{
               shop { name currencyCode plan { displayName } }
@@ -32,7 +62,7 @@ jobs:
             }"""
           }
           req = urllib.request.Request(
-              url,
+              f"https://{shop}/admin/api/{version}/graphql.json",
               data=json.dumps(query).encode(),
               headers={
                   "Content-Type": "application/json",
@@ -52,7 +82,10 @@ jobs:
           print("STORE:", shopinfo.get("name"), shopinfo.get("currencyCode"))
           print("PLAN:", ((shopinfo.get("plan") or {}).get("displayName")))
           print("RECENT ORDERS:")
-          for edge in ((data.get("orders") or {}).get("edges") or []):
+          edges = ((data.get("orders") or {}).get("edges") or [])
+          if not edges:
+              print("(none)")
+          for edge in edges:
               n = edge["node"]
               money = ((n.get("totalPriceSet") or {}).get("shopMoney") or {})
               print(n.get("name"), n.get("displayFinancialStatus"), n.get("displayFulfillmentStatus"), money.get("amount"), money.get("currencyCode"))
