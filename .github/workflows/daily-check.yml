@@ -1,0 +1,59 @@
+name: Daily store check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 15 * * *"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Need secrets
+        if: ${{ secrets.SHOPIFY_ACCESS_TOKEN == '' || secrets.SHOPIFY_SHOP == '' }}
+        run: |
+          echo "Missing GitHub secrets. Add SHOPIFY_ACCESS_TOKEN and SHOPIFY_SHOP."
+          exit 1
+      - name: Ping Shopify
+        env:
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          SHOPIFY_SHOP: ${{ secrets.SHOPIFY_SHOP }}
+          SHOPIFY_API_VERSION: "2025-10"
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          shop = os.environ["SHOPIFY_SHOP"].replace("https://", "").replace("http://", "").strip("/")
+          token = os.environ["SHOPIFY_ACCESS_TOKEN"]
+          version = os.environ.get("SHOPIFY_API_VERSION", "2025-10")
+          url = f"https://{shop}/admin/api/{version}/graphql.json"
+          query = {
+            "query": """{
+              shop { name currencyCode plan { displayName } }
+              orders(first: 5, sortKey: CREATED_AT, reverse: true) {
+                edges { node { name displayFinancialStatus displayFulfillmentStatus createdAt totalPriceSet { shopMoney { amount currencyCode } } } }
+              }
+            }"""
+          }
+          req = urllib.request.Request(
+              url,
+              data=json.dumps(query).encode(),
+              headers={
+                  "Content-Type": "application/json",
+                  "X-Shopify-Access-Token": token,
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              payload = json.loads(resp.read().decode())
+          if payload.get("errors"):
+              raise SystemExit(payload["errors"])
+          data = payload.get("data") or {}
+          shopinfo = data.get("shop") or {}
+          print("STORE:", shopinfo.get("name"), shopinfo.get("currencyCode"))
+          print("PLAN:", ((shopinfo.get("plan") or {}).get("displayName")))
+          print("RECENT ORDERS:")
+          for edge in ((data.get("orders") or {}).get("edges") or []):
+              n = edge["node"]
+              money = ((n.get("totalPriceSet") or {}).get("shopMoney") or {})
+              print(n.get("name"), n.get("displayFinancialStatus"), n.get("displayFulfillmentStatus"), money.get("amount"), money.get("currencyCode"))
+          PY
