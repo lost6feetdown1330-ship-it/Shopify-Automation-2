@@ -18,7 +18,7 @@ jobs:
           SHOPIFY_API_VERSION: "2025-10"
         run: |
           python - <<'PY'
-          import json, os, urllib.parse, urllib.request
+          import json, os, urllib.error, urllib.parse, urllib.request
 
           shop = (os.environ.get("SHOPIFY_SHOP") or "").replace("https://", "").replace("http://", "").strip("/")
           token = os.environ.get("SHOPIFY_ACCESS_TOKEN") or ""
@@ -29,13 +29,22 @@ jobs:
           if not shop:
               raise SystemExit("Missing SHOPIFY_SHOP secret.")
 
+          def read_error(err):
+              body = ""
+              if getattr(err, "fp", None):
+                  try:
+                      body = err.fp.read().decode("utf-8", "replace")
+                  except Exception:
+                      body = ""
+              return f"{err} | {body}"
+
           if not token:
               if not client_id or not client_secret:
                   raise SystemExit("Need SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET (the shpss one).")
               data = urllib.parse.urlencode({
                   "grant_type": "client_credentials",
-                  "client_id": client_id,
-                  "client_secret": client_secret,
+                  "client_id": client_id.strip(),
+                  "client_secret": client_secret.strip(),
               }).encode()
               req = urllib.request.Request(
                   f"https://{shop}/admin/oauth/access_token",
@@ -46,8 +55,8 @@ jobs:
               try:
                   with urllib.request.urlopen(req, timeout=30) as resp:
                       payload = json.loads(resp.read().decode())
-              except Exception as e:
-                  raise SystemExit(f"Token exchange failed: {e}")
+              except urllib.error.HTTPError as e:
+                  raise SystemExit("Token exchange failed: " + read_error(e))
               token = payload.get("access_token") or ""
               if not token:
                   raise SystemExit(f"Token exchange returned no access_token: {payload}")
@@ -73,8 +82,8 @@ jobs:
           try:
               with urllib.request.urlopen(req, timeout=30) as resp:
                   payload = json.loads(resp.read().decode())
-          except Exception as e:
-              raise SystemExit(f"Shopify request failed: {e}")
+          except urllib.error.HTTPError as e:
+              raise SystemExit("Shopify request failed: " + read_error(e))
           if payload.get("errors"):
               raise SystemExit(payload["errors"])
           data = payload.get("data") or {}
