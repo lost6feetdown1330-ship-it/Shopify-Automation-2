@@ -9,11 +9,6 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Need secrets
-        if: ${{ secrets.SHOPIFY_ACCESS_TOKEN == '' || secrets.SHOPIFY_SHOP == '' }}
-        run: |
-          echo "Missing GitHub secrets. Add SHOPIFY_ACCESS_TOKEN and SHOPIFY_SHOP."
-          exit 1
       - name: Ping Shopify
         env:
           SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
@@ -22,8 +17,10 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          shop = os.environ["SHOPIFY_SHOP"].replace("https://", "").replace("http://", "").strip("/")
-          token = os.environ["SHOPIFY_ACCESS_TOKEN"]
+          shop = (os.environ.get("SHOPIFY_SHOP") or "").replace("https://", "").replace("http://", "").strip("/")
+          token = os.environ.get("SHOPIFY_ACCESS_TOKEN") or ""
+          if not shop or not token:
+              raise SystemExit("Missing secrets. Add SHOPIFY_ACCESS_TOKEN and SHOPIFY_SHOP in repo Settings > Secrets > Actions.")
           version = os.environ.get("SHOPIFY_API_VERSION", "2025-10")
           url = f"https://{shop}/admin/api/{version}/graphql.json"
           query = {
@@ -43,8 +40,11 @@ jobs:
               },
               method="POST",
           )
-          with urllib.request.urlopen(req, timeout=30) as resp:
-              payload = json.loads(resp.read().decode())
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  payload = json.loads(resp.read().decode())
+          except Exception as e:
+              raise SystemExit(f"Shopify request failed: {e}")
           if payload.get("errors"):
               raise SystemExit(payload["errors"])
           data = payload.get("data") or {}
